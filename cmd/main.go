@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-
 	"github.com/zesty-taxi/zesty-matching/internal/adapters/kafka_producer"
+	locationclient "github.com/zesty-taxi/zesty-matching/internal/adapters/location"
+	redisclient "github.com/zesty-taxi/zesty-matching/internal/adapters/redis"
 	"github.com/zesty-taxi/zesty-matching/internal/config"
 	"github.com/zesty-taxi/zesty-matching/internal/controller"
 	"github.com/zesty-taxi/zesty-matching/internal/usecase"
@@ -32,6 +33,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// OTel — трейсинг + метрики
 	_, otelShutdown, err := customotel.Init(ctx, cfg.Telemetry)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to init otel")
@@ -44,25 +46,44 @@ func main() {
 		}
 	}()
 
+	// Prometheus метрики
 	m, err := metrics.New(cfg.Telemetry.ServiceName)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to create metrics for prometheus")
+		log.Fatal().Err(err).Msg("failed to create metrics")
 	}
 
-	// pool, err := db.InitDB(ctx, cfg.DB)
-	// if err != nil {
-	// 	log.Fatal().Err(err).Msg("failed to create pool connection for db")
-	// }
-	// defer pool.Close()
+	// Redis
+	cache, err := redisclient.NewClient(
+		cfg.Redis.Address(),
+		cfg.Redis.Password,
+		cfg.Redis.DB,
+	)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect redis")
+	}
+	defer func() {
+		if err := cache.Close(); err != nil {
+			log.Error().Err(err).Msg("redis close error")
+		}
+	}()
 
+	// Location Service HTTP клиент
+	locationClient := locationclient.NewClient(cfg.LocationBaseURL)
+
+	// Kafka Producer
 	kafkaProducer := kafka_producer.NewProducer(cfg.Kafka.Brokers)
+	defer kafkaProducer.Close()
 
-	useCase := usecase.New(kafkaProducer)
-	handler := controller.New() // TO DO
-	consumer := controller.NewConsumer(cfg.Kafka.Brokers, cfg.Kafka.ConsumerGroup, useCase, kafkaProducer)
+	// UseCase
+	uc := usecase.New(cache, locationClient, kafkaProducer)
+
+	// Kafka Consumer
+	consumer := controller.NewConsumer(cfg.Kafka.Brokers, cfg.Kafka.ConsumerGroup, uc, kafkaProducer)
 	consumer.Start(ctx)
 	defer consumer.Close()
 
+	// HTTP сервер
+	handler := controller.New()
 	httpServer := http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      handler.LoadRoutes(*cfg, m),
@@ -75,24 +96,25 @@ func main() {
 		log.Info().
 			Str("port", strconv.Itoa(cfg.Port)).
 			Str("env", cfg.Telemetry.Environment).
-			Msg("started http server")
+			Msg("matching service started")
 
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("failed on listen and serve")
+			log.Fatal().Err(err).Msg("http server error")
 		}
 	}()
 
+	// Graceful shutdown
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-signalCh
 
-	log.Info().Str("signal", sig.String()).Msg("application got signal, shutting down")
+	log.Info().Str("signal", sig.String()).Msg("shutting down")
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer shutdownCancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Fatal().Err(err).Msg("failed on shutdown server")
+		log.Fatal().Err(err).Msg("http shutdown error")
 	}
 
 	log.Info().Msg("bye bye!")
