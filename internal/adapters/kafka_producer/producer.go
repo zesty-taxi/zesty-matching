@@ -18,9 +18,10 @@ type Producer struct {
 
 func NewProducer(brokers []string) *Producer {
 	topics := []string{
+		domain.TopicRideOfferCreated,
 		domain.TopicRideDriverAssigned,
 		domain.TopicRideMatchingFailed,
-		domain.TopicRideDLQ,
+		domain.TopicMatchingDLQ,
 	}
 
 	writers := make(map[string]*kafka.Writer, len(topics))
@@ -107,7 +108,7 @@ func (p *Producer) PublishDLQ(
 
 	key := fmt.Sprintf("%s:%d:%d", sourceTopic, msg.Partition, msg.Offset)
 
-	return p.PublishRawWithHeaders(ctx, domain.TopicRideDLQ, key, payload, []kafka.Header{
+	return p.PublishRawWithHeaders(ctx, domain.TopicMatchingDLQ, key, payload, []kafka.Header{
 		{
 			Key:   "event_type",
 			Value: []byte("dead_letter"),
@@ -121,4 +122,46 @@ func (p *Producer) PublishDLQ(
 			Value: []byte("1"),
 		},
 	})
+}
+
+func (p *Producer) PublishRideOfferCreated(ctx context.Context, event domain.RideOfferCreatedEvent) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal RideOfferCreatedEvent: %w", err)
+	}
+
+	return p.PublishRaw(
+		ctx,
+		domain.TopicRideOfferCreated,
+		event.DriverID,
+		payload,
+	)
+}
+
+func (p *Producer) PublishDriverAssigned(ctx context.Context, event domain.DriverAssignedEvent) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal DriverAssignedEvent: %w", err)
+	}
+
+	return p.PublishRaw(
+		ctx,
+		domain.TopicRideDriverAssigned,
+		event.RideID,
+		payload,
+	)
+}
+
+func (p *Producer) PublishMatchingFailed(ctx context.Context, event domain.MatchingFailedEvent) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal MatchingFailedEvent: %w", err)
+	}
+
+	return p.PublishRaw(
+		ctx,
+		domain.TopicRideMatchingFailed,
+		event.RideID,
+		payload,
+	)
 }

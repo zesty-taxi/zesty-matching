@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/segmentio/kafka-go"
@@ -12,9 +11,10 @@ import (
 )
 
 type UseCaseHandle interface {
-	HandleDriverAssigned(ctx context.Context, event domain.DriverAssignedEvent) error
-	// HandleDriverLocation(ctx context.Context, event domain.DriverLocationUpdatedEvent) error
-	HandleMatchingFailed(ctx context.Context, event domain.MatchingFailedEvent) error
+	HandleRideRequested(ctx context.Context, event domain.RideRequestedEvent) error
+	HandleRideCancelled(ctx context.Context, event domain.RideCancelledEvent) error
+	HandleRideOfferAccepted(ctx context.Context, event domain.RideOfferAcceptedEvent) error
+	HandleRideOfferDeclined(ctx context.Context, event domain.RideOfferDeclinedEvent) error
 }
 
 type EventPublisher interface {
@@ -148,74 +148,57 @@ func (c *Consumer) dispatch(ctx context.Context, topic string, msg kafka.Message
 }
 
 func (c *Consumer) handleRideRequested(ctx context.Context, payload []byte) error {
-	var event domain.DriverAssignedEvent
+	var event domain.RideRequestedEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
-		return domain.Permanent(fmt.Errorf("unmarshal DriverAssignedEvent: %w", err))
+		return domain.Permanent(fmt.Errorf("unmarshal RideRequestedEvent: %w", err))
 	}
 
 	if event.EventID == "" {
-		return domain.Permanent(fmt.Errorf("invalid DriverAssignedEvent: empty event_id"))
+		return domain.Permanent(fmt.Errorf("invalid RideRequestedEvent: empty event_id"))
 	}
 
 	if event.RideID == "" {
-		return domain.Permanent(fmt.Errorf("invalid DriverAssignedEvent: empty ride_id"))
+		return domain.Permanent(fmt.Errorf("invalid RideRequestedEvent: empty ride_id"))
 	}
 
-	if event.DriverID == "" {
-		return domain.Permanent(fmt.Errorf("invalid DriverAssignedEvent: empty driver_id"))
-	}
-
-	if event.ETASeconds < 0 {
-		return domain.Permanent(fmt.Errorf("invalid DriverAssignedEvent: negative eta_seconds"))
-	}
-
-	if event.AssignedAt.IsZero() {
-		event.AssignedAt = time.Now().UTC()
-	}
+	// TO DO: more validate
 
 	log.Info().
 		Str("event_id", event.EventID).
 		Str("ride_id", event.RideID).
-		Str("driver_id", event.DriverID).
-		Int("eta_seconds", event.ETASeconds).
-		Msg("driver assigned")
+		Msg("ride requested")
 
-	return c.uc.HandleDriverAssigned(ctx, event)
+	return c.uc.HandleRideRequested(ctx, event)
 }
 
-func (c *Consumer) handleRideCancelled(ctx context.Context, payload []byte) error
+func (c *Consumer) handleRideCancelled(ctx context.Context, payload []byte) error {
+	var event domain.RideCancelledEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return domain.Permanent(fmt.Errorf("unmarshal RideCancelledEvent: %w", err))
+	}
+
+	// TO DO Validate and log
+	return c.uc.HandleRideCancelled(ctx, event)
+}
 
 func (c *Consumer) handleRideOfferAccepted(ctx context.Context, payload []byte) error {
-	var event domain.MatchingFailedEvent
+	var event domain.RideOfferAcceptedEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
-		return domain.Permanent(fmt.Errorf("unmarshal MatchingFailedEvent: %w", err))
+		return domain.Permanent(fmt.Errorf("unmarshal RideOfferAcceptedEvent: %w", err))
 	}
 
-	if event.EventID == "" {
-		return domain.Permanent(fmt.Errorf("invalid MatchingFailedEvent: empty event_id"))
-	}
+	// TO DO Validate and log
 
-	if event.RideID == "" {
-		return domain.Permanent(fmt.Errorf("invalid MatchingFailedEvent: empty ride_id"))
-	}
-
-	switch event.Reason {
-	case "no_drivers_available", "timeout":
-	default:
-		return domain.Permanent(fmt.Errorf("invalid MatchingFailedEvent: unknown reason %q", event.Reason))
-	}
-
-	if event.FailedAt.IsZero() {
-		event.FailedAt = time.Now().UTC()
-	}
-
-	log.Info().
-		Str("event_id", event.EventID).
-		Str("ride_id", event.RideID).
-		Str("reason", event.Reason).
-		Msg("matching failed")
-
-	return c.uc.HandleMatchingFailed(ctx, event)
+	return c.uc.HandleRideOfferAccepted(ctx, event)
 }
 
-func (c *Consumer) handleRideOfferDeclined(ctx context.Context, payload []byte) error
+func (c *Consumer) handleRideOfferDeclined(ctx context.Context, payload []byte) error {
+	var event domain.RideOfferDeclinedEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return domain.Permanent(fmt.Errorf("unmarshal RideOfferDeclinedEvent: %w", err))
+	}
+
+	// TO DO Validate and log
+
+	return c.uc.HandleRideOfferDeclined(ctx, event)
+}

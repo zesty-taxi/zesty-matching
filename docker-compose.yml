@@ -1,0 +1,50 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: matching_cache
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+
+  migrations:
+    image: gomicro/goose:latest
+    env_file:
+      - .env.docker
+    volumes:
+      - ./db/migrations:/migrations
+    command: ["goose", "-dir", "/migrations", "up"]
+    restart: on-failure
+
+  migrations-down:
+    container_name: migration-down
+    image: gomicro/goose:latest
+    env_file:
+      - .env.docker
+    volumes:
+      - ./db/migrations:/migrations
+    command: ["goose", "-dir", "/migrations", "down"]
+    restart: on-failure
+
+  ride-service:
+    build: .
+    container_name: matching-service
+    env_file:
+      - .env.docker
+    ports:
+      - 4004:4004
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    external: true
+    name: zesty-network

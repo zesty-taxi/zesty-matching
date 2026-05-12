@@ -2,6 +2,14 @@ package domain
 
 import "errors"
 
+const (
+	MatchingFailedNoDrivers = "no_drivers_available"
+	MatchingFailedTimeout   = "timeout"
+
+	OfferDeclinedByDriver = "declined_by_driver"
+	OfferTimeout          = "timeout"
+)
+
 var (
 	ErrUnknownVehicleType    = errors.New("unknown vehicle type")
 	ErrNotFound              = errors.New("not found")

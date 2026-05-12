@@ -1,0 +1,15 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      check-blank: true
+      check-type-assertions: false
+      exclude-functions:
+        - (io.Closer).Close
